@@ -40,6 +40,9 @@ module Delayed
         opts.on('-i', '--identifier=n', 'A numeric identifier for the worker.') do |n|
           @options[:identifier] = n
         end
+        opts.on('-s', '--seconds', 'Approximate number of seconds to run fori') do |n|
+          @options[:seconds] = n
+        end
       end
       @args = opts.parse!(args)
     end
