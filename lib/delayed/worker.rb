@@ -16,6 +16,11 @@ module Delayed
     # (perhaps to inspect the reason for the failure), set this to false.
     cattr_accessor :destroy_failed_jobs
     self.destroy_failed_jobs = true
+
+    # by default the worker will run forever. If this is changed to a number > 0, the work
+    # will run for approximatly that many seconds then exit
+    cattr_accessor :seconds
+    self.seconds = nil
     
     self.logger = if defined?(Rails)
       Rails.logger
@@ -45,6 +50,7 @@ module Delayed
       @quiet = options[:quiet]
       self.class.min_priority = options[:min_priority] if options.has_key?(:min_priority)
       self.class.max_priority = options[:max_priority] if options.has_key?(:max_priority)
+      self.class.seconds      = options[:seconds]      if options.has_key?(:seconds)
     end
 
     # Every worker has a unique name which by default is the pid of the process. There are some
@@ -64,6 +70,7 @@ module Delayed
 
     def start
       say "Starting job worker"
+      start_secs = Time.now.to_i
 
       trap('TERM') { say 'Exiting...'; $exit = true }
       trap('INT')  { say 'Exiting...'; $exit = true }
@@ -85,6 +92,7 @@ module Delayed
           say "#{count} jobs processed at %.4f j/s, %d failed ..." % [count / realtime, result.last]
         end
 
+        break if @@seconds && Time.now.to_i - start_secs > @@seconds
         break if $exit
       end
 

@@ -44,8 +44,9 @@ module Delayed
         opts.on('-m', '--monitor', 'Start monitor process.') do
           @monitor = true
         end
-        
-
+        opts.on('-s', '--seconds', 'Approximate number of seconds to run fori') do |n|
+          @options[:seconds] = n
+        end
       end
       @args = opts.parse!(args)
     end
