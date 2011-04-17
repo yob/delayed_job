@@ -1,6 +1,6 @@
 h1. Delayed::Job
 
-Delated_job (or DJ) encapsulates the common pattern of asynchronously executing longer tasks in the background. 
+Delated_job (or DJ) encapsulates the common pattern of asynchronously executing longer tasks in the background.
 
 It is a direct extraction from Shopify where the job table is responsible for a multitude of core tasks. Amongst those tasks are:
 
@@ -9,45 +9,29 @@ It is a direct extraction from Shopify where the job table is responsible for a 
 * http downloads
 * updating smart collections
 * updating solr, our search server, after product changes
-* batch imports 
-* spam checks 
+* batch imports
+* spam checks
 
 h2. Installation
 
-To install as a gem, add the following to @config/environment.rb@:
+delayed_job 2.1 only supports Rails 3.0+. See the "2.0 branch":https://github.com/collectiveidea/delayed_job/tree/v2.0 for Rails 2.
+
+To install, add delayed_job to your @Gemfile@ and run `bundle install`:
 
 <pre>
-config.gem 'delayed_job'
-</pre>
-
-Rake tasks are not automatically loaded from gems, so you'll need to add the following to your Rakefile:
-
-<pre>
-begin
-  require 'delayed/tasks'
-rescue LoadError
-  STDERR.puts "Run `rake gems:install` to install delayed_job"
-end
-</pre>
-
-To install as a plugin:
-
-<pre>
-script/plugin install git://github.com/collectiveidea/delayed_job.git
+gem 'delayed_job'
 </pre>
 
 After delayed_job is installed, you will need to setup the backend.
 
-h2. Backends
+h3. Backends
 
 delayed_job supports multiple backends for storing the job queue. "See the wiki for other backends":http://wiki.github.com/collectiveidea/delayed_job/backends besides Active Record.
-
-h3. Active Record
 
 The default is Active Record, which requires a jobs table.
 
 <pre>
-$ script/generate delayed_job
+$ script/rails generate delayed_job
 $ rake db:migrate
 </pre>
 
@@ -57,10 +41,10 @@ Call @.delay.method(params)@ on any object and it will be processed in the backg
 
 <pre>
 # without delayed_job
-Notifier.deliver_signup(@user)
+@user.activate!(@device)
 
 # with delayed_job
-Notifier.delay.deliver_signup @user
+@user.delay.activate!(@device)
 </pre>
 
 If a method should always be run in the background, you can call @#handle_asynchronously@ after the method declaration:
@@ -77,6 +61,53 @@ device = Device.new
 device.deliver
 </pre>
 
+handle_asynchronously can take as options anything you can pass to delay. In addition the values can be Proc objects allowing call time evaluation of the value. For some examples:
+
+<pre>
+class LongTasks
+  def send_mailer
+    # Some other code
+  end
+  handle_asynchronously :send_mailer, :priority => 20
+
+  def in_the_future
+    # Some other code
+  end
+  # 5.minutes.from_now will be evaluated when in_the_future is called
+  handle_asynchronously :in_the_future, :run_at => Proc.new { 5.minutes.from_now }
+
+  def self.when_to_run
+    2.hours.from_now
+  end
+
+  def call_a_class_method
+    # Some other code
+  end
+  handle_asynchronously :call_a_class_method, :run_at => Proc.new { when_to_run }
+
+  attr_reader :how_important
+
+  def call_an_instance_method
+    # Some other code
+  end
+  handle_asynchronously :call_an_instance_method, :priority => Proc.new {|i| i.how_important }
+end
+</pre>
+
+h3. Rails 3 Mailers
+
+Due to how mailers are implemented in Rails 3, we had to do a little work around to get delayed_job to work.
+
+<pre>
+# without delayed_job
+Notifier.signup(@user).deliver
+
+# with delayed_job
+Notifier.delay.signup(@user)
+</pre>
+
+Remove the @.deliver@ method to make it work. It's not ideal, but it's the best we could do for now.
+
 h2. Running Jobs
 
 @script/delayed_job@ can be used to manage a background process which will start working off jobs.  Make sure you've run `script/generate delayed_job`.
@@ -92,39 +123,61 @@ $ RAILS_ENV=production script/delayed_job stop
 
 Workers can be running on any computer, as long as they have access to the database and their clock is in sync. Keep in mind that each worker will check the database at least every 5 seconds.
 
-You can also invoke @rake jobs:work@ which will start working off jobs. You can cancel the rake task with @CTRL-C@. 
+You can also invoke @rake jobs:work@ which will start working off jobs. You can cancel the rake task with @CTRL-C@.
 
 h2. Custom Jobs
 
-Jobs are simple ruby objects with a method called perform. Any object which responds to perform can be stuffed into the jobs table. Job objects are serialized to yaml so that they can later be resurrected by the job runner. 
+Jobs are simple ruby objects with a method called perform. Any object which responds to perform can be stuffed into the jobs table. Job objects are serialized to yaml so that they can later be resurrected by the job runner.
 
 <pre>
 class NewsletterJob < Struct.new(:text, :emails)
   def perform
     emails.each { |e| NewsletterMailer.deliver_text_to_email(text, e) }
-  end    
-end  
-  
+  end
+end
+
 Delayed::Job.enqueue NewsletterJob.new('lorem ipsum...', Customers.find(:all).collect(&:email))
 </pre>
 
-You can also add an optional on_permanent_failure method which will run if the job has failed too many times to be retried:
+h2. Hooks
+
+You can define hooks on your job that will be called at different stages in the process:
 
 <pre>
 class ParanoidNewsletterJob < NewsletterJob
+  def enqueue(job)
+    record_stat 'newsletter_job/enqueue'
+  end
+
   def perform
     emails.each { |e| NewsletterMailer.deliver_text_to_email(text, e) }
-  end    
+  end
 
-  def on_permanent_failure
+  def before(job)
+    record_stat 'newsletter_job/start'
+  end
+
+  def after(job)
+    record_stat 'newsletter_job/after'
+  end
+
+  def success(job)
+    record_stat 'newsletter_job/success'
+  end
+
+  def error(job, exception)
+    notify_hoptoad(exception)
+  end
+
+  def failure
     page_sysadmin_in_the_middle_of_the_night
   end
-end  
+end
 </pre>
 
 h2. Gory Details
 
-The library evolves around a delayed_jobs table which looks as follows: 
+The library evolves around a delayed_jobs table which looks as follows:
 
 <pre>
 create_table :delayed_jobs, :force => true do |table|
@@ -154,6 +207,11 @@ Delayed::Worker.destroy_failed_jobs = false. The failed jobs will be marked with
 By default, workers will loop forever or until killed. If Delayed::Worker.seconds is set to a number >= 0 then the
 workers will exit after approximatly that number of seconds.
 
+By default all jobs are scheduled with priority = 0, which is top priority. You can change this by setting
+Delayed::Worker.default_priority to something else. Lower numbers have higher priority.
+
+It is possible to disable delayed jobs for testing purposes. Set Delayed::Worker.delay_jobs = false to execute all jobs realtime.
+
 Here is an example of changing job parameters in Rails:
 
 <pre>
@@ -163,6 +221,7 @@ Delayed::Worker.sleep_delay = 60
 Delayed::Worker.max_attempts = 3
 Delayed::Worker.max_run_time = 5.minutes
 Delayed::Worker.seconds = 5.minutes
+Delayed::Worker.delay_jobs = !Rails.env.test?
 </pre>
 
 h3. Cleaning up
@@ -177,19 +236,13 @@ h2. How to contribute
 
 If you find what looks like a bug:
 
-# Check the GitHub issue tracker to see if anyone else has had the same issue.
-   http://github.com/collectiveidea/delayed_job/issues/
+# Search the "mailing list":http://groups.google.com/group/delayed_job to see if anyone else had the same issue.
+# Check the "GitHub issue tracker":http://github.com/collectiveidea/delayed_job/issues/ to see if anyone else has reported issue.
 # If you don't see anything, create an issue with information on how to reproduce it.
 
 If you want to contribute an enhancement or a fix:
 
 # Fork the project on github.
-   http://github.com/collectiveidea/delayed_job/
 # Make your changes with tests.
-# Commit the changes without making changes to the Rakefile, VERSION, or any other files that aren't related to your enhancement or fix
+# Commit the changes without making changes to the Rakefile or any other files that aren't related to your enhancement or fix
 # Send a pull request.
-
-h3. Changelog
-
-See http://wiki.github.com/collectiveidea/delayed_job/changelog for a list of changes.
-

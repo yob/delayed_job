@@ -1,10 +1,5 @@
 source 'http://rubygems.org'
-gem 'activesupport', '~>3'
-gem 'daemons'
+gemspec
 
-group :development do
-  gem 'rspec'
-  gem 'rake'
-  gem 'activerecord', '~>3'
-  gem 'sqlite3-ruby'
-end
+gem 'ruby-debug',   :platform => :ruby_18
+gem 'ruby-debug19', :platform => :ruby_19

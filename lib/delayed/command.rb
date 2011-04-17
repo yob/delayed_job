@@ -46,6 +46,11 @@ module Delayed
         end
         opts.on('-s', '--seconds', 'Approximate number of seconds to run fori') do |n|
           @options[:seconds] = n
+        opts.on('--sleep-delay N', "Amount of time to sleep when no jobs are found") do |n|
+          @options[:sleep_delay] = n
+        end
+        opts.on('-p', '--prefix NAME', "String to be prefixed to worker process names") do |prefix|
+          @options[:prefix] = prefix
         end
       end
       @args = opts.parse!(args)
@@ -76,6 +81,7 @@ module Delayed
     
     def run_process(process_name, dir)
       Daemons.run_proc(process_name, :dir => dir, :dir_mode => :normal, :monitor => @monitor, :ARGV => @args) do |*args|
+        $0 = File.join(@options[:prefix], process_name) if @options[:prefix]
         run process_name
       end
     end

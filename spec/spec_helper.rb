@@ -2,20 +2,22 @@ $:.unshift(File.dirname(__FILE__) + '/../lib')
 
 require 'rubygems'
 require 'bundler/setup'
-require 'spec'
+require 'rspec'
 require 'logger'
 
-gem 'activerecord', ENV['RAILS_VERSION'] if ENV['RAILS_VERSION']
+require 'rails'
+require 'active_record'
+require 'action_mailer'
 
 require 'delayed_job'
 require 'delayed/backend/shared_spec'
 
 Delayed::Worker.logger = Logger.new('/tmp/dj.log')
-RAILS_ENV = 'test'
+ENV['RAILS_ENV'] = 'test'
 
-require 'active_record'
-
-ActiveRecord::Base.establish_connection(:adapter => 'sqlite3', :database => ':memory:')
+config = YAML.load(File.read('spec/database.yml'))
+ActiveRecord::Base.configurations = {'test' => config['mysql']}
+ActiveRecord::Base.establish_connection
 ActiveRecord::Base.logger = Delayed::Worker.logger
 ActiveRecord::Migration.verbose = false
 
@@ -41,9 +43,9 @@ end
 
 # Purely useful for test cases...
 class Story < ActiveRecord::Base
-  def tell; text; end       
+  def tell; text; end
   def whatever(n, _); tell*n; end
-  
+
   handle_asynchronously :whatever
 end
 
@@ -51,3 +53,6 @@ Delayed::Worker.backend = :active_record
 
 # Add this directory so the ActiveSupport autoloading works
 ActiveSupport::Dependencies.autoload_paths << File.dirname(__FILE__)
+
+# Add this to simulate Railtie initializer being executed
+ActionMailer::Base.send(:extend, Delayed::DelayMail)

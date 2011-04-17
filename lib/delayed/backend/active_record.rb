@@ -1,19 +1,5 @@
 require 'active_record'
 
-class ActiveRecord::Base
-  yaml_as "tag:ruby.yaml.org,2002:ActiveRecord"
-  
-  def self.yaml_new(klass, tag, val)
-    klass.find(val['attributes']['id'])
-  rescue ActiveRecord::RecordNotFound
-    nil
-  end
-
-  def to_yaml_properties
-    ['@attributes']
-  end
-end
-
 module Delayed
   module Backend
     module ActiveRecord
@@ -22,23 +8,20 @@ module Delayed
       class Job < ::ActiveRecord::Base
         include Delayed::Backend::Base
         set_table_name :delayed_jobs
-        
+
         before_save :set_default_run_at
 
-        if ::ActiveRecord::VERSION::MAJOR >= 3
-          scope :ready_to_run, lambda {|worker_name, max_run_time|
-            where(['(run_at <= ? AND (locked_at IS NULL OR locked_at < ?) OR locked_by = ?) AND failed_at IS NULL', db_time_now, db_time_now - max_run_time, worker_name])
-          }
-          scope :by_priority, order('priority ASC, run_at ASC')
-        else
-          named_scope :ready_to_run, lambda {|worker_name, max_run_time|
-            {:conditions => ['(run_at <= ? AND (locked_at IS NULL OR locked_at < ?) OR locked_by = ?) AND failed_at IS NULL', db_time_now, db_time_now - max_run_time, worker_name]}
-          }
-          named_scope :by_priority, :order => 'priority ASC, run_at ASC'
+        scope :ready_to_run, lambda {|worker_name, max_run_time|
+          where(['(run_at <= ? AND (locked_at IS NULL OR locked_at < ?) OR locked_by = ?) AND failed_at IS NULL', db_time_now, db_time_now - max_run_time, worker_name])
+        }
+        scope :by_priority, order('priority ASC, run_at ASC')
+
+        def self.before_fork
+          ::ActiveRecord::Base.clear_all_connections!
         end
 
         def self.after_fork
-          ::ActiveRecord::Base.connection.reconnect!
+          ::ActiveRecord::Base.establish_connection
         end
 
         # When a worker is exiting, make sure we don't have any locked jobs.
@@ -51,7 +34,7 @@ module Delayed
           scope = self.ready_to_run(worker_name, max_run_time)
           scope = scope.scoped(:conditions => ['priority >= ?', Worker.min_priority]) if Worker.min_priority
           scope = scope.scoped(:conditions => ['priority <= ?', Worker.max_priority]) if Worker.max_priority
-      
+
           ::ActiveRecord::Base.silence do
             scope.by_priority.all(:limit => limit)
           end
@@ -70,8 +53,10 @@ module Delayed
             self.class.update_all(["locked_at = ?", now], ["id = ? and locked_by = ?", id, worker])
           end
           if affected_rows == 1
-            self.locked_at    = now
-            self.locked_by    = worker
+            self.locked_at = now
+            self.locked_by = worker
+            self.locked_at_will_change!
+            self.locked_by_will_change!
             return true
           else
             return false

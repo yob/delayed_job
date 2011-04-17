@@ -12,50 +12,58 @@ end
 class ErrorJob
   cattr_accessor :runs; self.runs = 0
   def perform; raise 'did not work'; end
-end             
+end
+
+class CustomRescheduleJob < Struct.new(:offset)
+  cattr_accessor :runs; self.runs = 0
+  def perform; raise 'did not work'; end
+  def reschedule_at(time, attempts); time + offset; end
+end
 
 class LongRunningJob
   def perform; sleep 250; end
 end
 
 class OnPermanentFailureJob < SimpleJob
-  def on_permanent_failure
-  end
+  def failure; end
+  def max_attempts; 1; end
 end
 
 module M
   class ModuleJob
     cattr_accessor :runs; self.runs = 0
-    def perform; @@runs += 1; end    
+    def perform; @@runs += 1; end
   end
 end
 
-class SuccessfulCallbackJob
+class CallbackJob
   cattr_accessor :messages
 
-  def before(job)
-    SuccessfulCallbackJob.messages << 'before perform'
+  def enqueue(job)
+    self.class.messages << 'enqueue'
   end
-  
-  def perform
-    SuccessfulCallbackJob.messages << 'perform'
-  end
-  
-  def after(job, error = nil)
-    SuccessfulCallbackJob.messages << 'after perform'
-  end
-  
-  def success(job)
-    SuccessfulCallbackJob.messages << 'success!'
-  end
-  
-  def failure(job, error)
-    SuccessfulCallbackJob.messages << "error: #{error.class}"
-  end
-end
 
-class FailureCallbackJob < SuccessfulCallbackJob
+  def before(job)
+    self.class.messages << 'before'
+  end
+
   def perform
-     raise "failure job"
+    self.class.messages << 'perform'
+  end
+
+  def after(job)
+    self.class.messages << 'after'
+  end
+
+  def success(job)
+    self.class.messages << 'success'
+  end
+
+  def error(job, error)
+    self.class.messages << "error: #{error.class}"
+  end
+
+  def failure(job)
+    self.class.messages << 'failure'
   end
 end
